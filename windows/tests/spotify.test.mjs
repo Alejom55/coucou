@@ -217,6 +217,24 @@ test("the cover arrives on its own event", () => {
   assert.equal(currentArtwork(), "data:image/png;base64,AA");
 });
 
+test("a delayed SMTC cover replaces the previous image under the same track key", () => {
+  const card = buildSpotifyCard();
+  const imageA = "data:image/png;base64,AA";
+  const imageB = "data:image/png;base64,BB";
+  emit("spotify", playing({ track: track({ id: "A", artUrl: "smtc:A" }) }));
+  emit("spotify-artwork", { artUrl: "smtc:A", dataUrl: imageA });
+  card.sync();
+  emit("spotify", playing({ track: track({ id: "B", artUrl: "smtc:B" }) }));
+  assert.equal(currentArtwork(), null);
+  // Windows can expose B's title while its thumbnail still contains A.
+  emit("spotify-artwork", { artUrl: "smtc:B", dataUrl: imageA });
+  card.sync();
+  emit("spotify-artwork", { artUrl: "smtc:B", dataUrl: imageB });
+  card.sync();
+  assert.equal(currentArtwork(), imageB);
+  assert.equal(card.el.find("IMG")[0].getAttribute("src"), imageB);
+});
+
 test("the card reads the player again each time it comes on screen", () => {
   const before = sent("spotify_refresh").length;
   State.mode = "expanded";

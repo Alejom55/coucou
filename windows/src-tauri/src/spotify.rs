@@ -1441,7 +1441,6 @@ pub fn windows_track(title: &str, artist: &str, album: &str, duration: f64) -> O
 #[cfg(windows)]
 mod win {
     use super::*;
-    use std::collections::VecDeque;
     use std::path::PathBuf;
     use std::sync::mpsc::{self, Receiver, Sender};
     use std::sync::{LazyLock, Mutex};
@@ -1485,9 +1484,6 @@ mod win {
 
     static SHARED: LazyLock<Mutex<Shared>> =
         LazyLock::new(|| Mutex::new(Shared { generation: 0, active: false, wake: None, state: PlayerState::default() }));
-
-    /// Covers already read, by the track's art key; the newest last.
-    static ART: LazyLock<Mutex<VecDeque<(String, String)>>> = LazyLock::new(|| Mutex::new(VecDeque::new()));
 
     /// WinRT and Core Audio need COM on the calling thread. A thread that has it
     /// already, in either model, keeps it.
@@ -1771,25 +1767,12 @@ mod win {
 
     // ── Artwork ───────────────────────────────────────────────────────────────
 
-    /// The track's cover, as a data URL (the page may not load anything
-    /// remote). Read once per track; Spotify sometimes adds the thumbnail a
-    /// moment after the title, and the next event brings it then.
+    /// Re-read on each refresh: SMTC can publish a new title with the previous
+    /// thumbnail before publishing the new image. A track-keyed cache freezes it.
     fn artwork(app: &AppHandle, track: &Track, props: &MediaProperties) {
         use tauri::Emitter;
         let Some(key) = track.art_url.clone() else { return };
-        let cached = ART.lock().unwrap().iter().find(|(k, _)| *k == key).map(|(_, d)| d.clone());
-        let data = match cached {
-            Some(data) => data,
-            None => {
-                let Some(data) = thumbnail(props).as_deref().and_then(data_url) else { return };
-                let mut art = ART.lock().unwrap();
-                art.push_back((key.clone(), data.clone()));
-                while art.len() > 12 {
-                    art.pop_front();
-                }
-                data
-            }
-        };
+        let Some(data) = thumbnail(props).as_deref().and_then(data_url) else { return };
         let _ = app.emit_to(crate::island::WINDOW_LABEL, ARTWORK_EVENT, Artwork { art_url: key, data_url: data });
     }
 
